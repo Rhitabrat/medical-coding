@@ -45,7 +45,13 @@ export async function POST(request: Request) {
     });
   }
 
-  const intent = await classifyIntent(userText);
+  let intent;
+  try {
+    intent = await classifyIntent(userText);
+  } catch (err) {
+    console.error("[chat] classifyIntent failed:", err);
+    return NextResponse.json({ error: "classifyIntent failed" }, { status: 500 });
+  }
   if (intent.intent === "unrelated") {
     return NextResponse.json({
       sessionId: body.sessionId || crypto.randomUUID(),

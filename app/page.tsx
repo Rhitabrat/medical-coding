@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -8,17 +8,23 @@ type ChatMessage = {
 };
 
 const STORAGE_KEY = "medical-coding-chat-session";
+const WELCOME =
+  "Hello! I'm your Medical Coding Assistant. Ask me about ICD codes, diagnoses, or symptoms and I'll help you find the right code.";
 
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
-      const parsed = JSON.parse(saved) as { sessionId: string; messages: ChatMessage[] };
+      const parsed = JSON.parse(saved) as {
+        sessionId: string;
+        messages: ChatMessage[];
+      };
       setSessionId(parsed.sessionId);
       setMessages(parsed.messages || []);
     }
@@ -26,14 +32,21 @@ export default function Home() {
 
   useEffect(() => {
     if (!sessionId) return;
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ sessionId, messages })
-    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ sessionId, messages }));
   }, [sessionId, messages]);
 
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  const clearChat = () => {
+    setMessages([]);
+    setSessionId(null);
+    localStorage.removeItem(STORAGE_KEY);
+  };
+
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || loading) return;
 
     const nextMessages: ChatMessage[] = [
       ...messages,
@@ -50,17 +63,12 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          messages: nextMessages.map((msg) => ({
-            role: msg.role,
-            content: msg.content
-          }))
+          messages: nextMessages.map((m) => ({ role: m.role, content: m.content }))
         })
       });
 
       const data = await res.json();
-      if (data.error) {
-        throw new Error(data.error);
-      }
+      if (data.error) throw new Error(data.error);
 
       setSessionId(data.sessionId);
       setMessages((current) => [
@@ -72,8 +80,7 @@ export default function Home() {
         ...current,
         {
           role: "assistant",
-          content:
-            "Sorry, something went wrong. Please try again in a moment."
+          content: "Sorry, something went wrong. Please try again in a moment."
         }
       ]);
       console.error(error);
@@ -82,44 +89,106 @@ export default function Home() {
     }
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    sendMessage();
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   };
 
-  const welcome = useMemo(
-    () =>
-      "Hello! Ask me about ICD codes, descriptions, or which code fits a diagnosis."
-  , []);
-
   return (
-    <main className="container">
-      <section className="chat-window">
-        <h1>Medical Coding Assistant</h1>
+    <div className="app">
+      <header className="header">
+        <div className="header-brand">
+          <div className="brand-icon">MC</div>
+          <div>
+            <div className="brand-title">Medical Coding Assistant</div>
+            <div className="brand-sub">ICD-10 Code Lookup</div>
+          </div>
+        </div>
+        <button
+          className="clear-btn"
+          onClick={clearChat}
+          disabled={messages.length === 0}
+        >
+          Clear Chat
+        </button>
+      </header>
+
+      <main className="chat-body">
         <div className="messages">
-          <div className="message assistant">{welcome}</div>
-          {messages.map((message, index) => (
+          <div className="message-row">
+            <div className="avatar ai-avatar">AI</div>
+            <div className="bubble ai-bubble">{WELCOME}</div>
+          </div>
+
+          {messages.map((msg, i) => (
             <div
-              key={index}
-              className={`message ${message.role}`}
+              key={i}
+              className={`message-row ${msg.role === "user" ? "user-row" : ""}`}
             >
-              <strong>{message.role === "user" ? "You" : "Assistant"}:</strong>{" "}
-              {message.content}
+              {msg.role === "assistant" && (
+                <div className="avatar ai-avatar">AI</div>
+              )}
+              <div
+                className={`bubble ${
+                  msg.role === "user" ? "user-bubble" : "ai-bubble"
+                }`}
+              >
+                {msg.content.split("\n").map((line, j, arr) => (
+                  <span key={j}>
+                    {line}
+                    {j < arr.length - 1 && <br />}
+                  </span>
+                ))}
+              </div>
+              {msg.role === "user" && (
+                <div className="avatar user-avatar">You</div>
+              )}
             </div>
           ))}
+
+          {loading && (
+            <div className="message-row">
+              <div className="avatar ai-avatar">AI</div>
+              <div className="bubble ai-bubble typing">
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+          )}
+
+          <div ref={bottomRef} />
         </div>
-        <form onSubmit={handleSubmit} className="input-row">
-          <input
+      </main>
+
+      <footer className="input-area">
+        <form
+          className="input-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            sendMessage();
+          }}
+        >
+          <textarea
+            className="input-box"
             value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask about an ICD code or diagnosis..."
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask about an ICD code or diagnosis... (Enter to send, Shift+Enter for new line)"
             disabled={loading}
+            rows={1}
           />
-          <button type="submit" disabled={loading || !input.trim()}>
-            {loading ? "Thinking..." : "Send"}
+          <button
+            className="send-btn"
+            type="submit"
+            disabled={loading || !input.trim()}
+          >
+            Send
           </button>
         </form>
-      </section>
-    </main>
+      </footer>
+    </div>
   );
 }
